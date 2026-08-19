@@ -1,0 +1,59 @@
+services:
+  - type: web
+    name: creative-performance-library
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: META_API_VERSION
+        value: v21.0
+      - key: META_SYSTEM_USER_TOKEN
+        sync: false
+      - key: META_APPOINTMENT_ACTION_TYPES
+        sync: false
+      - key: HYROS_API_KEY
+        sync: false
+      - key: HYROS_BASE_URL
+        value: https://api.hyros.com/v1
+      - key: HYROS_ATTRIBUTION_MODEL
+        value: last_click
+      - key: HYROS_APPOINTMENT_FIELD
+        value: qualified_calls
+      - key: AUTO_REFRESH_MINUTES
+        value: 30
+      - key: META_CACHE_TTL_MINUTES
+        value: 35
+      - key: META_SNAPSHOT_PATH
+        sync: false
+      - key: SYNC_INTERVAL_HOURS
+        value: 6
+      - key: SYNC_TRIGGER_SECRET
+        sync: false
+      - key: ALLOWED_EMAIL_DOMAIN
+        value: insidesuccess.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: CPL_ADMIN_EMAILS
+        sync: false
+  - type: cron
+    name: creative-performance-library-sync
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run trigger-sync
+    schedule: "0 */6 * * *"
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: CPL_SYNC_URL
+        sync: false
+      - key: SYNC_TRIGGER_SECRET
+        sync: false

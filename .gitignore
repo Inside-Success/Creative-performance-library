@@ -1,0 +1,27 @@
+node_modules/
+.pnpm-store/
+.next/
+out/
+build/
+dist/
+
+# Local env — never commit the Meta system-user token
+.env
+.env.local
+.env*.local
+
+*.tsbuildinfo
+
+.DS_Store
+Thumbs.db
+
+# Local assistant/tool state
+.claude/
+
+# Office lock files (the decision sheet lives in this folder)
+.~lock.*#
+~$*
+
+# Local data snapshots from the sync job
+data/*.json
+!data/.gitkeep
