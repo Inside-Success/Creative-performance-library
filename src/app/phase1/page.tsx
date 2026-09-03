@@ -11,11 +11,11 @@ export default function Phase1Page() {
         <PageHeader
           eyebrow="Technical Validation"
           title="System Checks"
-          subtitle="Live provider checks across the two approved ad accounts. The page opens immediately, then waits here while Meta and Hyros return the latest network results."
+          subtitle="Live provider checks across the two approved ad accounts. Nothing is queried until you expand the section below - the check bypasses the snapshot cache and re-queries Meta directly."
           aside={
             <div className="sync-card">
               <span>Meta spike</span>
-              <strong>Running live checks</strong>
+              <strong>Idle until opened</strong>
               <Link className="small-card-link" href="/api/meta/spike">
                 View live JSON
               </Link>

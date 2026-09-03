@@ -25,12 +25,15 @@ export function RefreshControl({
   autoRefreshMinutes = 0,
   dataHealth,
   canRefresh = false,
+  datePreset,
 }: {
   checkedAt?: string | null;
   /** Minutes between automatic refreshes. 0 or less disables auto-refresh. */
   autoRefreshMinutes?: number;
   dataHealth?: MetaSnapshotHealth;
   canRefresh?: boolean;
+  /** Refresh the range currently being viewed, not always the default. */
+  datePreset?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -82,7 +85,10 @@ export function RefreshControl({
     pendingRef.current = true;
 
     try {
-      const response = await fetch("/api/meta/refresh", {
+      const url = datePreset
+        ? `/api/meta/refresh?range=${encodeURIComponent(datePreset)}`
+        : "/api/meta/refresh";
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -103,7 +109,7 @@ export function RefreshControl({
       setIsRefreshing(false);
       pendingRef.current = false;
     }
-  }, [canRefresh, router]);
+  }, [canRefresh, datePreset, router]);
 
   const busy = isPending || isRefreshing;
 

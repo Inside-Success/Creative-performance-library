@@ -1,15 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DateRangeSelect } from "@/components/date-range-select";
 import { RefreshControl } from "@/components/refresh-control";
 import { phase0 } from "@/config/phase0";
+import { dateRangeLabel } from "@/lib/date-range";
 import { funnels } from "@/lib/sample-data";
 import { formatCurrency, formatNumber, sortCreativesForBucket } from "@/lib/ranking";
 import type {
+  AttributionContext,
   CreativeBucket,
   CreativeMetric,
   CreativeStatus,
   MetaSnapshotHealth,
+  RankingMode,
 } from "@/lib/types";
 
 const pageSize = 12;
@@ -17,22 +21,26 @@ const pageSize = 12;
 const bucketLabels: Record<CreativeBucket, string> = {
   winning: "Winners",
   losing: "Watch / Cut",
-  notEnoughData: "Needs Attribution",
+  // Renamed from "Needs Attribution", which read as "this row has an
+  // attribution bug". The bucket actually means "not enough spend or signal
+  // to call yet". Avoids reusing "Watch" from the losing label above. The
+  // `notEnoughData` key is unchanged.
+  notEnoughData: "Too Early to Call",
 };
 
-const bucketHelpByBasis: Record<"appointment" | "proxy", Record<CreativeBucket, string>> = {
+const bucketHelpByMode: Record<RankingMode, Record<CreativeBucket, string>> = {
   appointment: {
-    winning: "Winners ranked by lowest cost per appointment.",
-    losing: "Ads with meaningful spend and no appointments, or low volume at high CPA.",
-    notEnoughData: "Rows below the minimum spend threshold or without enough signal to call.",
+    winning: `Enough appointments to be real (${phase0.thresholds.winnerAppointmentThreshold}+) AND cost per appointment at or under $${phase0.thresholds.targetCpaBenchmark}. Ordered cheapest booking first.`,
+    losing: `Spent over $${phase0.thresholds.minSpend} and booked nothing, or booked at a cost per appointment above $${phase0.thresholds.targetCpaBenchmark}. High volume at a bad cost lands here too.`,
+    notEnoughData: `Under $${phase0.thresholds.minSpend} spend, or booking at an acceptable cost but not yet at ${phase0.thresholds.winnerAppointmentThreshold} appointments. Not a verdict - just not enough yet.`,
   },
-  proxy: {
+  "lead-proxy": {
     winning:
-      "Ranked by lowest cost per LEAD, not cost per appointment. A cheap lead is not a booked appointment - treat this order as provisional.",
+      "Ranked by lowest cost per LEAD, not cost per appointment - no appointment source resolved for any row. A cheap lead is not a booked appointment; treat this order as provisional.",
     losing:
       "High-spend ads with no leads, very low lead volume, or weak lead efficiency. Judged on leads, not appointments.",
     notEnoughData:
-      "Rows below the minimum spend threshold or without enough lead signal to call.",
+      "Below the minimum spend threshold, or without enough lead signal to call.",
   },
 };
 
@@ -82,22 +90,72 @@ function CreativePreview({ creative }: { creative: CreativeMetric }) {
   );
 }
 
+/**
+ * Names the provider behind a row's appointment number, so a Hyros-attributed
+ * count is never read as a Meta-native one.
+ */
+function AppointmentSourceBadge({
+  creative,
+  attribution,
+}: {
+  creative: CreativeMetric;
+  attribution: AttributionContext;
+}) {
+  if (creative.appointments === null) {
+    return (
+      <span
+        className="src-badge src-none"
+        title="No appointment source answered for this ad, so it is ranked on the lead proxy. This is NOT the same as a confirmed zero."
+      >
+        no source
+      </span>
+    );
+  }
+
+  if (creative.appointmentSource === "hyros") {
+    return (
+      <span
+        className="src-badge src-hyros"
+        title={`${creative.appointmentSourceDetail ?? "hyros"} - ${attribution.hyrosAttributionModel ?? "last_click"} attribution, ${attribution.hyrosWindowStart ?? "?"} to ${attribution.hyrosWindowEnd ?? "?"} UTC. Not a Meta-reported number.`}
+      >
+        Hyros
+      </span>
+    );
+  }
+
+  if (creative.appointmentSource === "meta") {
+    return (
+      <span
+        className="src-badge src-meta"
+        title={`Meta action type ${creative.appointmentSourceDetail ?? "(configured)"}.`}
+      >
+        Meta
+      </span>
+    );
+  }
+
+  return null;
+}
+
 function CreativeTable({
   bucket,
   creatives,
   dataMode,
   page,
-  isProxyRanked,
+  rankingMode,
+  attribution,
 }: {
   bucket: CreativeBucket;
   creatives: CreativeMetric[];
   dataMode: "sample" | "live";
   page: number;
-  isProxyRanked: boolean;
+  rankingMode: RankingMode;
+  attribution: AttributionContext;
 }) {
-  const sorted = sortCreativesForBucket(bucket, creatives);
+  const sorted = sortCreativesForBucket(bucket, creatives, rankingMode);
   const start = (page - 1) * pageSize;
   const pageRows = sorted.slice(start, start + pageSize);
+  const isProxyRanked = rankingMode === "lead-proxy";
 
   if (pageRows.length === 0) {
     return (
@@ -118,12 +176,26 @@ function CreativeTable({
             <th>Ad Account</th>
             <th>Delivery</th>
             <th>Spend</th>
-            <th>Leads</th>
-            <th title={isProxyRanked ? "Ranking metric while appointments are unavailable." : undefined}>
+            <th title="Shown for context. Leads are not the ranking key.">Leads</th>
+            <th
+              title={
+                isProxyRanked
+                  ? "Ranking metric while no appointment source has resolved."
+                  : "Context only - the ranking runs on cost per appointment."
+              }
+            >
               CPL{isProxyRanked ? " (ranking metric)" : ""}
             </th>
-            <th>Appts</th>
-            <th>Cost / Appt</th>
+            <th title="Appointment volume - one of the two ranking axes.">Appts</th>
+            <th
+              title={
+                isProxyRanked
+                  ? "No appointment source resolved for these rows."
+                  : "Ranking metric: appointment volume, then cost per appointment."
+              }
+            >
+              Cost / Appt{isProxyRanked ? "" : " (ranking metric)"}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -163,20 +235,18 @@ function CreativeTable({
               </td>
               <td className="money">{formatCurrency(creative.spend)}</td>
               <td>{formatNumber(creative.leads)}</td>
-              <td
-                className={`money ${
-                  !isProxyRanked
-                    ? ""
-                    : bucket === "winning"
-                      ? "good"
-                      : bucket === "losing"
-                        ? "bad"
-                        : "neutral"
-                }`}
-              >
+              <td className={`money ${isProxyRanked ? (bucket === "winning" ? "good" : bucket === "losing" ? "bad" : "neutral") : ""}`}>
                 {formatCurrency(creative.costPerLead)}
               </td>
-              <td className="money">{formatNumber(creative.appointments)}</td>
+              <td className="money">
+                <span className="appt-cell">
+                  {formatNumber(creative.appointments)}
+                  <AppointmentSourceBadge
+                    creative={creative}
+                    attribution={attribution}
+                  />
+                </span>
+              </td>
               <td
                 className={`money ${
                   isProxyRanked
@@ -205,6 +275,10 @@ export function Dashboard({
   autoRefreshMinutes = 0,
   dataHealth,
   canRefresh = false,
+  rankingMode = "appointment",
+  proxyRowCount = 0,
+  attribution,
+  datePreset,
 }: {
   creatives: CreativeMetric[];
   dataMode?: "sample" | "live";
@@ -213,12 +287,27 @@ export function Dashboard({
   autoRefreshMinutes?: number;
   dataHealth?: MetaSnapshotHealth;
   canRefresh?: boolean;
+  /**
+   * The metric the whole view ranks on. Passed in from `resolveRankingMode`
+   * rather than re-derived here - deriving it independently is what let the
+   * page header and this table's column header disagree.
+   */
+  rankingMode?: RankingMode;
+  /** Rows with no appointment source, still ordered on the lead proxy. */
+  proxyRowCount?: number;
+  attribution?: AttributionContext;
+  datePreset?: string;
 }) {
   const [bucket, setBucket] = useState<CreativeBucket>("winning");
   const [funnel, setFunnel] = useState("All Offers");
   const [account, setAccount] = useState("All Accounts");
   const [status, setStatus] = useState<CreativeStatus | "All">("All");
   const [page, setPage] = useState(1);
+
+  const resolvedAttribution: AttributionContext = attribution ?? {
+    metaDatePreset: datePreset ?? "last_30d",
+    appointmentSource: "unconfigured",
+  };
 
   const filteredCreatives = useMemo(() => {
     return creatives.filter((creative) => {
@@ -242,16 +331,10 @@ export function Dashboard({
   }, [filteredCreatives]);
 
   const activeBucketRows = useMemo(
-    () => sortCreativesForBucket(bucket, filteredCreatives),
-    [bucket, filteredCreatives],
+    () => sortCreativesForBucket(bucket, filteredCreatives, rankingMode),
+    [bucket, filteredCreatives, rankingMode],
   );
 
-  // A single row ranked on the proxy is enough to make the whole view provisional.
-  const isProxyRanked = useMemo(
-    () => creatives.some((creative) => creative.attributionBasis === "lead-proxy"),
-    [creatives],
-  );
-  const basisKey = isProxyRanked ? "proxy" : "appointment";
   const pageCount = Math.max(1, Math.ceil(activeBucketRows.length / pageSize));
   const pageNumbers = useMemo(
     () => Array.from({ length: pageCount }, (_, index) => index + 1),
@@ -283,9 +366,15 @@ export function Dashboard({
         <span className={`status-chip ${dataMode === "live" ? "pass" : "partial"}`}>
           {dataMode === "live" ? "Live Meta data" : "Sample dashboard data"}
         </span>
+        <span className="status-chip neutral">
+          {rankingMode === "appointment"
+            ? "Ranked on cost per appointment"
+            : "Ranked on cost per lead (proxy)"}
+        </span>
       </div>
 
       <div className="filters">
+        {datePreset ? <DateRangeSelect value={datePreset} /> : null}
         <div className="field">
           <label htmlFor="funnel">Funnel / Offer</label>
           <select
@@ -374,12 +463,55 @@ export function Dashboard({
           autoRefreshMinutes={autoRefreshMinutes}
           dataHealth={dataHealth}
           canRefresh={canRefresh}
+          datePreset={datePreset}
         />
       </div>
 
       <div className="bucket-note">
-        <strong>{bucketLabels[bucket]}:</strong> {bucketHelpByBasis[basisKey][bucket]}{" "}
+        <strong>{bucketLabels[bucket]}:</strong> {bucketHelpByMode[rankingMode][bucket]}{" "}
         Showing {formatNumber(activeBucketRows.length)} rows.
+      </div>
+
+      {/*
+        Standing answer to "why does this ad have spend but no appointments?".
+        Meta's spend window and Hyros's appointment window are NOT the same
+        window, and last-click attribution routes a booking to the last ad
+        clicked - so a top-of-funnel ad can legitimately show spend and zero
+        appointments. Stated here so it stops being re-investigated.
+      */}
+      <div className="attribution-note">
+        <div>
+          <strong>Spend</strong> is Meta, {dateRangeLabel(resolvedAttribution.metaDatePreset)}
+          {" "}(ad account timezone, excludes today).
+        </div>
+        {resolvedAttribution.hyrosField ? (
+          <div>
+            <strong>Appointments</strong> are Hyros{" "}
+            <code>{resolvedAttribution.hyrosField}</code>,{" "}
+            {resolvedAttribution.hyrosAttributionModel ?? "last_click"} attribution,{" "}
+            {resolvedAttribution.hyrosWindowStart ?? "?"} to{" "}
+            {resolvedAttribution.hyrosWindowEnd ?? "?"} UTC (includes today).{" "}
+            <em>
+              The two windows differ, and last-click credits the booking to the
+              last ad clicked - so spend with zero appointments can be correct
+              rather than a bug.
+            </em>
+          </div>
+        ) : (
+          <div>
+            <strong>Appointments</strong> have no resolved source. Meta cannot
+            supply them for these accounts (verified 2026-08-18: zero custom
+            conversions, no booking action type), so rows fall back to the lead
+            proxy.
+          </div>
+        )}
+        {proxyRowCount > 0 && rankingMode === "appointment" ? (
+          <div className="attribution-warn">
+            {formatNumber(proxyRowCount)} row(s) had no appointment source and
+            are ordered on the lead proxy. A confirmed zero is ranked; an
+            unanswered row is not the same thing.
+          </div>
+        ) : null}
       </div>
 
       <CreativeTable
@@ -387,7 +519,8 @@ export function Dashboard({
         creatives={filteredCreatives}
         dataMode={dataMode}
         page={page}
-        isProxyRanked={isProxyRanked}
+        rankingMode={rankingMode}
+        attribution={resolvedAttribution}
       />
 
       <div className="pagination">

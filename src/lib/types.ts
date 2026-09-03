@@ -9,6 +9,33 @@ export type CreativeBucket = "winning" | "losing" | "notEnoughData";
  */
 export type RankingBasis = "appointment" | "lead-proxy" | "insufficient";
 
+/**
+ * The metric the WHOLE view is ranked on. Derived in exactly one place
+ * (`resolveRankingMode` in ./ranking) and passed down, so the page header and
+ * the table column header can never disagree about it.
+ */
+export type RankingMode = "appointment" | "lead-proxy";
+
+/** Which provider supplied a row's appointment count, if any. */
+export type AppointmentSource = "meta" | "hyros" | "none";
+
+export type LoserTier = "zeroAppointments" | "lowVolumeHighCost" | "highCpa";
+
+/**
+ * Provider windows behind a snapshot. Meta and Hyros do NOT share a window:
+ * Meta's preset resolves in the ad account timezone and excludes today, Hyros
+ * is queried in UTC and includes today. Surfaced so "spend but no
+ * appointments" can be read correctly instead of re-investigated.
+ */
+export type AttributionContext = {
+  metaDatePreset: string;
+  appointmentSource: AppointmentSourceMode;
+  hyrosField?: string;
+  hyrosAttributionModel?: string;
+  hyrosWindowStart?: string;
+  hyrosWindowEnd?: string;
+};
+
 export type AppointmentSourceMode =
   | "exact-action-types"
   | "keyword-heuristic"
@@ -34,7 +61,11 @@ export type AppointmentSourceStatus = {
   rowsWithAppointments: number;
   customConversionCount: number;
   hyrosRowsMatched?: number;
+  hyrosRowsWithAppointments?: number;
   hyrosAppointmentField?: string;
+  hyrosAttributionModel?: string;
+  hyrosWindowStart?: string;
+  hyrosWindowEnd?: string;
   candidates: MetaActionTotal[];
   message: string;
 };
@@ -56,8 +87,16 @@ export type CreativeMetric = {
   costPerAppointment: number | null;
   bucket: CreativeBucket;
   attributionBasis: RankingBasis;
+  /**
+   * Which provider the `appointments` value came from. `hyros` must stay
+   * visible in the UI so Hyros-attributed numbers are never read as
+   * Meta-native ones. Optional so fixture rows stay valid.
+   */
+  appointmentSource?: AppointmentSource;
+  /** Exact source label for the row, e.g. `hyros:qualified_calls`. */
+  appointmentSourceDetail?: string;
   previewUrl?: string;
-  loserTier?: "zeroAppointments" | "lowVolumeHighCost" | "highCpa";
+  loserTier?: LoserTier;
 };
 
 export type MetaSpikeCheck = {
@@ -110,6 +149,12 @@ export type MetaSpikeCreativeRow = {
   leadActionType: string | null;
   /** Which configured appointment action types actually appeared on this row. */
   appointmentActionTypes: string[];
+  /**
+   * Which provider answered for appointments on this row. `none` means no
+   * provider covered it - distinct from a provider answering zero, which is
+   * `appointments: 0` with a real source.
+   */
+  appointmentSource: AppointmentSource;
 };
 
 export type MetaSpikeResult = {
@@ -133,6 +178,11 @@ export type MetaDashboardSnapshot = {
   datePreset: string;
   spike: MetaSpikeResult;
   creatives: CreativeMetric[];
+};
+
+export type DateRangeOption = {
+  value: string;
+  label: string;
 };
 
 export type MetaSnapshotHealth = {

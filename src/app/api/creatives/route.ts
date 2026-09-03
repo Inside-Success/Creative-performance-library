@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { phase0 } from "@/config/phase0";
+import { DATE_RANGE_PARAM, resolveDatePreset } from "@/lib/date-range";
 import { getMetaSnapshot } from "@/lib/meta-cache";
-import { sortCreativesForBucket } from "@/lib/ranking";
+import { resolveRankingMode, sortCreativesForBucket } from "@/lib/ranking";
 import type { CreativeBucket } from "@/lib/types";
 
 const buckets = new Set<CreativeBucket>(["winning", "losing", "notEnoughData"]);
@@ -12,9 +13,10 @@ export async function GET(request: Request) {
   const funnel = searchParams.get("funnel") ?? "All Offers";
   const account = searchParams.get("account") ?? "All Accounts";
   const bucket = bucketParam && buckets.has(bucketParam) ? bucketParam : "notEnoughData";
+  const datePreset = resolveDatePreset(searchParams.get(DATE_RANGE_PARAM));
 
   try {
-    const { snapshot, health } = await getMetaSnapshot();
+    const { snapshot, health } = await getMetaSnapshot({ datePreset });
 
     if (!snapshot) {
       throw new Error(health.refreshError ?? "No Meta snapshot is available.");
@@ -40,7 +42,21 @@ export async function GET(request: Request) {
         thresholds: phase0.thresholds,
       },
       activeBucket: bucket,
-      creatives: sortCreativesForBucket(bucket, filtered),
+      rankingMode: resolveRankingMode(creatives),
+      attribution: {
+        metaDatePreset: snapshot.datePreset,
+        appointmentSource: snapshot.spike.appointmentSource.mode,
+        hyrosField: snapshot.spike.appointmentSource.hyrosAppointmentField,
+        hyrosAttributionModel:
+          snapshot.spike.appointmentSource.hyrosAttributionModel,
+        hyrosWindowStart: snapshot.spike.appointmentSource.hyrosWindowStart,
+        hyrosWindowEnd: snapshot.spike.appointmentSource.hyrosWindowEnd,
+      },
+      creatives: sortCreativesForBucket(
+        bucket,
+        filtered,
+        resolveRankingMode(creatives),
+      ),
       counts: {
         winning: filtered.filter((creative) => creative.bucket === "winning").length,
         losing: filtered.filter((creative) => creative.bucket === "losing").length,
