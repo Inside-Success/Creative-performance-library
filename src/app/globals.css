@@ -1117,3 +1117,191 @@ tr:last-child td {
     margin-top: 0;
   }
 }
+
+/* --- Diagnostics (collapsed by default) ---------------------------------- */
+
+.diagnostics {
+  margin-top: 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.diagnostics-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.diagnostics-summary::-webkit-details-marker {
+  display: none;
+}
+
+.diagnostics-summary::before {
+  content: "\25B8";
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.diagnostics[open] > .diagnostics-summary::before {
+  transform: rotate(90deg);
+}
+
+.diagnostics-summary span {
+  font-weight: 600;
+  color: var(--blue-dark);
+}
+
+.diagnostics-summary em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.diagnostics-summary:hover {
+  background: var(--panel-soft);
+}
+
+.diagnostics-body {
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 1rem;
+}
+
+.diagnostics-note {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+
+.diagnostics-note strong {
+  color: var(--ink);
+}
+
+.diagnostics-note code {
+  background: var(--gray-soft);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.78rem;
+}
+
+.diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.diagnostics-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  max-width: 46ch;
+}
+
+.phase-card small {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.sync-card-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* --- Attribution context ------------------------------------------------- */
+
+.attribution-note {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 10px;
+}
+
+.attribution-note strong {
+  color: var(--ink);
+}
+
+.attribution-note code {
+  background: var(--gray-soft);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+
+.attribution-note em {
+  font-style: normal;
+  color: var(--amber);
+}
+
+.attribution-warn {
+  color: var(--amber);
+  font-weight: 500;
+}
+
+/* --- Per-row appointment source badge ------------------------------------ */
+
+.appt-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.src-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: help;
+  white-space: nowrap;
+}
+
+.src-hyros {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-color: var(--amber-soft);
+}
+
+.src-meta {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: var(--green-soft);
+}
+
+.src-none {
+  background: var(--gray-soft);
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.status-chip.neutral {
+  background: var(--gray-soft);
+  color: var(--muted);
+}
+
+.field-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}

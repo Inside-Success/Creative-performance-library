@@ -13,6 +13,7 @@ const statusLabels = {
 } as const;
 
 type LoadState =
+  | { status: "idle"; result: null; error: null }
   | { status: "loading"; result: null; error: null }
   | { status: "ready"; result: MetaSpikeResult; error: null }
   | { status: "error"; result: MetaSpikeResult; error: string };
@@ -53,12 +54,25 @@ function failedSpikeResult(message: string): MetaSpikeResult {
 
 export function SystemChecksClient() {
   const [loadState, setLoadState] = useState<LoadState>({
-    status: "loading",
+    status: "idle",
     result: null,
     error: null,
   });
+  /**
+   * Nothing is fetched until the operator opens the section.
+   *
+   * `/api/meta/spike` bypasses the snapshot cache and runs a full live
+   * re-query - roughly 16-20 Graph calls across both accounts, 20-40 seconds,
+   * against a Meta rate limit these accounts have already tripped once.
+   * Firing that on every page load added Meta load nobody asked for.
+   */
+  const [hasStarted, setHasStarted] = useState(false);
 
   useEffect(() => {
+    if (!hasStarted) {
+      return;
+    }
+
     let isCurrent = true;
 
     async function loadLiveChecks() {
@@ -108,12 +122,13 @@ export function SystemChecksClient() {
       }
     }
 
+    setLoadState({ status: "loading", result: null, error: null });
     void loadLiveChecks();
 
     return () => {
       isCurrent = false;
     };
-  }, []);
+  }, [hasStarted]);
 
   const result = loadState.result;
   const unresolvedMappings = useMemo(
@@ -136,39 +151,60 @@ export function SystemChecksClient() {
     [result],
   );
 
-  if (loadState.status === "loading") {
-    return (
-      <section className="panel settings-panel live-check-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Live network check</p>
-            <h2>Running provider checks...</h2>
-            <p>
-              Meta and Hyros are being queried now. This page is responsive while the
-              providers return the latest results.
-            </p>
-          </div>
-          <span className="live-spinner" aria-hidden="true" />
-        </div>
-        <div className="phase-grid live-placeholder-grid">
-          {["Meta accounts", "Campaign insights", "Hyros attribution", "Mappings"].map(
-            (label) => (
-              <div className="phase-card live-placeholder-card" key={label}>
-                <span>{label}</span>
-                <strong>Checking...</strong>
-              </div>
-            ),
-          )}
-        </div>
-      </section>
-    );
-  }
-
-  if (!result) {
-    return null;
-  }
-
   return (
+    <details
+      className="diagnostics"
+      onToggle={(event) => {
+        // Fetch on first open only. Collapsing and re-opening reuses the
+        // result already in state rather than re-querying Meta.
+        if (event.currentTarget.open) {
+          setHasStarted(true);
+        }
+      }}
+    >
+      <summary className="diagnostics-summary">
+        <span>Live provider checks</span>
+        <em>
+          Queries Meta and Hyros directly - ~16-20 Graph calls, 20-40s, bypasses
+          the snapshot cache. Runs only when you open this.
+        </em>
+      </summary>
+
+      <div className="diagnostics-body">
+      {loadState.status === "idle" ? (
+        <div className="empty-state">
+          Not run yet. Opening this section starts a live check against both
+          approved ad accounts.
+        </div>
+      ) : null}
+
+      {loadState.status === "loading" ? (
+        <section className="panel settings-panel live-check-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Live network check</p>
+              <h2>Running provider checks...</h2>
+              <p>
+                Meta and Hyros are being queried now. This page is responsive while the
+                providers return the latest results.
+              </p>
+            </div>
+            <span className="live-spinner" aria-hidden="true" />
+          </div>
+          <div className="phase-grid live-placeholder-grid">
+            {["Meta accounts", "Campaign insights", "Hyros attribution", "Mappings"].map(
+              (label) => (
+                <div className="phase-card live-placeholder-card" key={label}>
+                  <span>{label}</span>
+                  <strong>Checking...</strong>
+                </div>
+              ),
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {!result ? null : (
     <>
       {loadState.status === "error" ? (
         <div className="stale-banner">
@@ -408,5 +444,8 @@ export function SystemChecksClient() {
         </div>
       </section>
     </>
+      )}
+      </div>
+    </details>
   );
 }

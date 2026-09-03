@@ -1,5 +1,5 @@
 import { phase0 } from "@/config/phase0";
-import { getHyrosAppointmentsForCreatives } from "@/lib/hyros";
+import { dateRangeForPreset, getHyrosAppointmentsForCreatives } from "@/lib/hyros";
 import { funnelMappings } from "@/lib/sample-data";
 import { classifyCreative } from "@/lib/ranking";
 import type {
@@ -522,7 +522,7 @@ function previewTextFor(row: MetaSpikeCreativeRow) {
 
 export function metaSpikeRowsToCreatives(rows: MetaSpikeCreativeRow[]) {
   return rows.map((row, index) => {
-    const { bucket, basis } = classifyCreative({
+    const { bucket, basis, loserTier } = classifyCreative({
       spend: row.spend,
       appointments: row.appointments,
       costPerAppointment: row.costPerAppointment,
@@ -547,13 +547,15 @@ export function metaSpikeRowsToCreatives(rows: MetaSpikeCreativeRow[]) {
       costPerAppointment: row.costPerAppointment,
       bucket,
       attributionBasis: basis,
+      appointmentSource: row.appointmentSource,
+      // e.g. "hyros:qualified_calls" - surfaced on the row so Hyros-attributed
+      // numbers are never read as Meta-native ones.
+      appointmentSourceDetail: row.appointmentActionTypes[0],
       previewUrl: row.previewUrl ?? undefined,
-      loserTier:
-        bucket === "losing" && row.appointments === 0
-          ? "zeroAppointments"
-          : bucket === "losing"
-            ? "lowVolumeHighCost"
-            : undefined,
+      // Comes straight from the classifier now. Re-deriving it here previously
+      // mislabelled every non-zero loser as `lowVolumeHighCost` and could never
+      // produce `highCpa` at all.
+      loserTier,
     } satisfies CreativeMetric;
   });
 }
@@ -734,6 +736,9 @@ export async function runMetaSpike(datePreset = "last_30d") {
         creativeId: ad?.creative?.id ?? null,
         leadActionType: leadMatch?.actionType ?? null,
         appointmentActionTypes: appointment.matchedTypes,
+        // Meta answered only if a configured action type actually resolved.
+        // The Hyros pass below overwrites this where Hyros covered the row.
+        appointmentSource: appointment.appointments !== null ? "meta" : "none",
       } satisfies MetaSpikeCreativeRow;
     });
 
@@ -770,6 +775,9 @@ export async function runMetaSpike(datePreset = "last_30d") {
       creativeRows.forEach((row) => {
         const appointments = hyros.appointmentsByAdId.get(row.adId);
 
+        // `undefined` means Hyros returned NO row for this ad - unknown, so
+        // the row stays null and falls to the proxy. A value of `0` means
+        // Hyros answered and the answer was zero: a real, rankable result.
         if (appointments === undefined) {
           return;
         }
@@ -777,17 +785,23 @@ export async function runMetaSpike(datePreset = "last_30d") {
         row.appointments = appointments;
         row.costPerAppointment = appointments > 0 ? row.spend / appointments : null;
         row.appointmentActionTypes = [`hyros:${hyros.summary.field}`];
+        row.appointmentSource = "hyros";
       });
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : "Hyros attribution failed before Hyros returned a response.";
+      const window = dateRangeForPreset(datePreset);
 
       hyrosSummary = {
         enabled: true,
         field: process.env.HYROS_APPOINTMENT_FIELD ?? "qualified_calls",
+        attributionModel: process.env.HYROS_ATTRIBUTION_MODEL ?? "last_click",
+        windowStart: window.startDate,
+        windowEnd: window.endDate,
         rowsMatched: 0,
+        rowsWithAppointments: 0,
         totalAppointments: 0,
         message,
       };
@@ -860,7 +874,11 @@ export async function runMetaSpike(datePreset = "last_30d") {
     rowsWithAppointments: totalAdsWithAppointments,
     customConversionCount: customConversions.length,
     hyrosRowsMatched: hyrosSummary?.rowsMatched,
+    hyrosRowsWithAppointments: hyrosSummary?.rowsWithAppointments,
     hyrosAppointmentField: hyrosSummary?.field,
+    hyrosAttributionModel: hyrosSummary?.attributionModel,
+    hyrosWindowStart: hyrosSummary?.windowStart,
+    hyrosWindowEnd: hyrosSummary?.windowEnd,
     candidates: appointmentCandidates.slice(0, 20),
     message:
       appointmentMode === "hyros-attribution"

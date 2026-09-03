@@ -6,10 +6,16 @@ const navItems = [
   { href: "/", label: "Dashboard" },
 ];
 
+/**
+ * `/phase1` (System Checks) is deliberately NOT listed here. It is reached
+ * only from the collapsed Diagnostics panel on the dashboard, so the single
+ * entry point sits next to the warning about what it costs - a full live Meta
+ * spike that bypasses the snapshot cache. Route access is still gated by
+ * `middleware.ts`; this only removes the nav surface.
+ */
 const adminNavItems = [
   { href: "/funnels", label: "Funnel Mapping" },
   { href: "/settings", label: "Settings" },
-  { href: "/phase1", label: "System Checks" },
 ];
 
 function initials(name?: string | null, email?: string | null) {

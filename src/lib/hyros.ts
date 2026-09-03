@@ -18,12 +18,29 @@ type HyrosAttributionResponse = {
 export type HyrosAppointmentSummary = {
   enabled: boolean;
   field: string;
+  /** Hyros attribution model the appointment counts were produced under. */
+  attributionModel: string;
+  /** Hyros query window (UTC, inclusive of today) - NOT Meta's spend window. */
+  windowStart: string;
+  windowEnd: string;
+  /**
+   * Ads Hyros returned a row for, including rows it explicitly scored zero.
+   * This is coverage, not success - compare against `rowsWithAppointments`.
+   */
   rowsMatched: number;
+  /** Subset of `rowsMatched` with a non-zero appointment count. */
+  rowsWithAppointments: number;
   totalAppointments: number;
   message: string;
 };
 
 export type HyrosAppointmentResult = {
+  /**
+   * Ad id -> appointment count. An entry with value `0` means Hyros answered
+   * for that ad and the answer was zero. An ad ABSENT from this map means
+   * Hyros returned nothing for it. Callers must not collapse those two cases:
+   * a confirmed zero is a rankable result, an absent row is unknown.
+   */
   appointmentsByAdId: Map<string, number>;
   summary: HyrosAppointmentSummary;
 };
@@ -107,15 +124,32 @@ function toNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function dateRangeForPreset(datePreset: string) {
+/**
+ * Days behind "now" for each Meta date_preset the dashboard exposes.
+ *
+ * Only rolling-day presets are supported. Calendar presets (`this_month`,
+ * `last_month`) are deliberately excluded: Meta resolves those in the ad
+ * account timezone and Hyros would resolve them in UTC, which silently shifts
+ * the two windows against each other at month boundaries.
+ *
+ * This window is still NOT identical to Meta's. Meta's `last_30d` is evaluated
+ * in the ad account timezone and excludes today; the window below is UTC and
+ * includes today. The difference is surfaced in the UI rather than hidden -
+ * it is a real reason an ad can show spend with no attributed appointments.
+ */
+export const HYROS_PRESET_DAYS: Record<string, number> = {
+  last_7d: 7,
+  last_14d: 14,
+  last_30d: 30,
+  last_90d: 90,
+};
+
+export function dateRangeForPreset(datePreset: string) {
   const end = new Date();
   const start = new Date(end);
+  const days = HYROS_PRESET_DAYS[datePreset] ?? 30;
 
-  if (datePreset === "last_7d") {
-    start.setUTCDate(start.getUTCDate() - 7);
-  } else {
-    start.setUTCDate(start.getUTCDate() - 30);
-  }
+  start.setUTCDate(start.getUTCDate() - days);
 
   return {
     startDate: formatHyrosDate(start),
@@ -234,6 +268,8 @@ export async function getHyrosAppointmentsForCreatives(
 ): Promise<HyrosAppointmentResult> {
   const key = hyrosApiKey();
   const field = hyrosAppointmentField();
+  const attributionModel = hyrosAttributionModel();
+  const { startDate, endDate } = dateRangeForPreset(datePreset);
 
   if (!key) {
     return {
@@ -241,7 +277,11 @@ export async function getHyrosAppointmentsForCreatives(
       summary: {
         enabled: false,
         field,
+        attributionModel,
+        windowStart: startDate,
+        windowEnd: endDate,
         rowsMatched: 0,
+        rowsWithAppointments: 0,
         totalAppointments: 0,
         message: "HYROS_API_KEY is not configured.",
       },
@@ -261,30 +301,33 @@ export async function getHyrosAppointmentsForCreatives(
         return;
       }
 
-      const appointments = toNumber(row[field]);
-
-      if (appointments > 0) {
-        appointmentsByAdId.set(adId, appointments);
-      }
+      // Record EVERY ad Hyros answered for, including an explicit zero.
+      // Dropping zeros here is what previously made "Hyros says this ad booked
+      // nothing" indistinguishable from "Hyros never returned this ad", which
+      // pushed a confirmed-zero row onto the lead proxy instead of ranking it.
+      appointmentsByAdId.set(adId, toNumber(row[field]));
     });
   }
 
-  const totalAppointments = Array.from(appointmentsByAdId.values()).reduce(
-    (sum, value) => sum + value,
-    0,
-  );
+  const values = Array.from(appointmentsByAdId.values());
+  const totalAppointments = values.reduce((sum, value) => sum + value, 0);
+  const rowsWithAppointments = values.filter((value) => value > 0).length;
 
   return {
     appointmentsByAdId,
     summary: {
       enabled: true,
       field,
+      attributionModel,
+      windowStart: startDate,
+      windowEnd: endDate,
       rowsMatched: appointmentsByAdId.size,
+      rowsWithAppointments,
       totalAppointments,
       message:
         appointmentsByAdId.size > 0
-          ? `Hyros ${field} matched ${appointmentsByAdId.size} Meta ad row(s).`
-          : `Hyros returned no ${field} values for the sampled Meta ad rows.`,
+          ? `Hyros ${field} (${attributionModel}, ${startDate} to ${endDate} UTC) covered ${appointmentsByAdId.size} Meta ad row(s); ${rowsWithAppointments} had at least one appointment.`
+          : `Hyros returned no rows at all for the sampled Meta ad ids over ${startDate} to ${endDate} UTC.`,
     },
   };
 }
